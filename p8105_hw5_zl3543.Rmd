@@ -1,11 +1,17 @@
 ---
 title: "p8105_hw5_zl3543"
+author: "Zihan Lin"
 output: github_document
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
 library(ggplot2)
+library(broom)
+library(purrr)
+library(tidyr)
+library(knitr)
 ```
 
 ### Problem 1
@@ -32,3 +38,239 @@ ggplot(plot_data, aes(x = GroupSize, y = Probability)) +
        x = "Group Size (n)", y = "Probability of Shared Birthday") +
   theme_minimal()
 ```
+
+### Problem 2
+```{r}
+# Set parameters
+n <- 30      # Sample size
+sigma <- 5   # Standard deviation
+mu_values <- 0:6  # True means to test
+alpha <- 0.05     # Significance level
+num_simulations <- 5000
+
+# Initialize a data frame to store results
+results <- data.frame(mu = numeric(), estimate = numeric(), p_value = numeric())
+
+# Set a seed for reproducibility
+set.seed(123)
+
+# Run simulations for each true mean (mu)
+for (mu in mu_values) {
+  for (i in 1:num_simulations) {
+    # Generate data from normal distribution with specified mean (mu) and standard deviation (sigma)
+    x <- rnorm(n, mean = mu, sd = sigma)
+    
+    # Conduct a one-sample t-test with null hypothesis mu = 0
+    t_test <- t.test(x, mu = 0)
+    
+    # Store the true mean (mu), estimated mean (mean of x), and p-value from the test
+    test_result <- tidy(t_test)
+    results <- rbind(results, data.frame(mu = mu, estimate = test_result$estimate, p_value = test_result$p.value))
+  }
+}
+
+# Calculate power (proportion of rejections) and mean estimates for each mu
+power_results <- results %>%
+  group_by(mu) %>%
+  summarize(
+    power = mean(p_value < alpha),  # Proportion of times null is rejected (power)
+    mean_estimate = mean(estimate), # Average estimate of mu_hat
+    mean_estimate_rejected = mean(estimate[p_value < alpha], na.rm = TRUE) # Average estimate when null is rejected
+  )
+
+# Plot power as a function of the true mean (mu)
+ggplot(power_results, aes(x = mu, y = power)) +
+  geom_line(color = "blue", linewidth = 1.2) +
+  labs(title = "Power of the Test vs True Mean",
+       x = "True Mean (mu)",
+       y = "Power") +
+  theme_minimal()
+```
+
+As we can see, the plot shows a clear association between effect size (the true mean 𝜇 and power: 1) Increasing Power with Effect Size - As the true mean 𝜇 increases, the power of the test increases. This is because larger effect sizes make it easier to detect a difference from the null hypothesis (which assumes 𝜇=0). When the true mean is close to zero, the power is low, meaning it’s harder to detect a difference. As 𝜇moves further from zero, it becomes easier to reject the null hypothesis correctly. 2) Nonlinear Growth - the relationship between effect size and power is nonlinear. At small effect sizes, increases in 𝜇 lead to larger improvements in power. However, as 𝜇continues to increase, gains in power taper off, approaching a maximum of 1. This is typical because, with very large effect sizes, the probability of correctly rejecting the null hypothesis is almost certain. 3) Significance Threshold Effect - Since the significance level 𝛼=0.05 determines the cutoff for rejection, small true means might often lead to p-values that don’t meet this threshold, resulting in low power. As the true mean increases, however, the effect becomes large enough to consistently yield p-values below 𝛼, enhancing power.
+
+```{r}
+# Assuming `results` is the data frame with simulation results
+average_estimates <- results %>%
+  group_by(mu) %>%
+  summarize(
+    mean_estimate = mean(estimate, na.rm = TRUE), # Average estimate across all samples
+    mean_estimate_rejected = mean(estimate[p_value < 0.05], na.rm = TRUE) # Average estimate for rejected nulls
+  )
+
+# Plot average estimate of mu_hat as a function of the true mean (mu)
+ggplot(average_estimates, aes(x = mu)) +
+  geom_line(aes(y = mean_estimate, color = "All Samples"), size = 1.2) +
+  geom_line(aes(y = mean_estimate_rejected, color = "Rejected Samples"), size = 1.2, linetype = "dashed") +
+  labs(title = "Average Estimate of μ̂ by True Mean (μ)",
+       x = "True Mean (μ)",
+       y = "Average Estimate of μ̂") +
+  scale_color_manual(name = "Sample Type",
+                     values = c("All Samples" = "blue", "Rejected Samples" = "red")) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+The sample average of 𝜇^ across tests for which the null is rejected is not exactly equal to the true value of 𝜇. This is due to selection bias: we are only considering samples that show a statistically significant result when the null hypothesis is rejected. When we restrict to samples where the null hypothesis was rejected, we are more likely to include samples where the observed effect size is larger than average. In summary, the mean of 𝜇^ across rejected tests tends to overestimate the true mean, particularly for smaller effect sizes, due to the bias introduced by only including significant tests. Because we’re only examining a subset of data that meets a specific significance criterion, our subset is biased, which leads to an overestimation of the true effect size in samples where the null hypothesis was rejected, especially when the actual effect size is small. 
+
+### Problem 3
+```{r}
+# Load the dataset
+homicides <- read.csv("https://raw.githubusercontent.com/washingtonpost/data-homicides/master/homicide-data.csv")
+
+# Create the `city_state` variable and summarize data
+city_summary <- homicides %>%
+  mutate(
+    city_state = paste(city, state, sep = ", "),  # Combine city and state
+    unsolved = disposition %in% c("Closed without arrest", "Open/No arrest")  
+  ) %>%
+  group_by(city_state) %>%
+  summarize(
+    total_homicides = n(),                    
+    unsolved_homicides = sum(unsolved),        
+    .groups = "drop"
+  )
+
+# Display the city summary table in a clean format
+city_summary %>%
+  rename(
+    `City, State` = city_state,
+    `Total Homicides` = total_homicides,
+    `Unsolved Homicides` = unsolved_homicides
+  ) %>%
+  arrange(desc(`Unsolved Homicides`)) %>%
+  knitr::kable(
+    caption = "Summary of Total and Unsolved Homicides by City",
+    format = "markdown"
+  )
+```
+
+The total_homicides column gives us the number of homicides recorded in each city. This number reflects the scale of homicides across the different cities. Larger cities, or those with high crime rates, tend to have higher numbers, giving an overview of the homicide burden in each area. The unsolved_homicides column shows the count of cases where no arrest has been made. Cases are labeled as "unsolved" if the disposition is “Closed without arrest” or “Open/No arrest.” This measure highlights the cities where a significant portion of homicides remain unresolved, suggesting challenges in achieving justice for victims. High counts of unsolved cases may indicate limited resources, investigative hurdles, or other systemic issues within law enforcement in those cities. By comparing unsolved_homicides to total_homicides, we get a sense of the "clearance rate" or the proportion of homicides solved by arrest. A lower clearance rate (higher proportion of unsolved cases) might point to issues within the city’s justice system or particular challenges in solving homicides in certain urban environments. The dataset thus reveals not only the extent of homicides across large U.S. cities but also the prevalence of unsolved cases. This information can be crucial for policymakers, law enforcement agencies, and communities working to address the issues related to violent crime and justice in urban areas. 
+
+```{r}
+# Filter data for Baltimore, MD
+baltimore_data <- homicides %>%
+  mutate(
+    city_state = paste(city, state, sep = ", "),  # Combine city and state
+    unsolved = disposition %in% c("Closed without arrest", "Open/No arrest")  # Flag unsolved cases
+  ) %>%
+  filter(city_state == "Baltimore, MD")  # Filter for Baltimore, MD
+
+# Total homicides and unsolved homicides in Baltimore
+total_baltimore_homicides <- nrow(baltimore_data)
+unsolved_baltimore_homicides <- sum(baltimore_data$unsolved)
+
+# Perform a proportion test
+baltimore_prop_test <- prop.test(
+  x = unsolved_baltimore_homicides,  # Number of unsolved homicides
+  n = total_baltimore_homicides,    # Total homicides
+  conf.level = 0.95                 # Confidence level
+)
+
+# Tidy the result using broom::tidy
+tidy_result <- tidy(baltimore_prop_test)
+
+# Extract estimated proportion and confidence intervals
+baltimore_estimates <- tidy_result %>%
+  select(estimate, conf.low, conf.high)
+
+# Display Baltimore-specific estimates
+baltimore_estimates %>%
+  rename(
+    `Proportion Unsolved` = estimate,
+    `Lower 95% CI` = conf.low,
+    `Upper 95% CI` = conf.high
+  ) %>%
+  kable(
+    caption = "Proportion of Unsolved Homicides in Baltimore, MD",
+    format = "markdown"
+  )
+```
+
+We will say that Baltimore, MD has a high proportion of unsolved homicides with a confidence interval that reflects a range of plausible values.
+
+```{r}
+# Prepare the data
+city_summary <- homicides %>%
+  mutate(
+    city_state = paste(city, state, sep = ", "),  # Combine city and state
+    unsolved = disposition %in% c("Closed without arrest", "Open/No arrest") 
+  ) %>%
+  group_by(city_state) %>%
+  summarise(
+    total_homicides = n(),                         
+    unsolved_homicides = sum(unsolved),            
+    .groups = "drop"
+  )
+
+# Apply prop.test for each city
+city_results <- city_summary %>%
+  mutate(
+    prop_test = map2(unsolved_homicides, total_homicides, ~ prop.test(.x, .y, conf.level = 0.95)),
+    tidy_result = map(prop_test, broom::tidy)  # Tidy the result of prop.test
+  ) %>%
+  unnest(tidy_result) %>%
+  select(
+    city_state, 
+    total_homicides, 
+    unsolved_homicides, 
+    estimate, 
+    conf.low, 
+    conf.high
+  )
+```
+
+The dataset provides a stark comparison between cities, revealing those with systemic issues in solving homicides.
+
+```{r}
+# Display the proportion of unsolved homicides and CIs for each city
+city_results %>%
+  rename(
+    `City, State` = city_state,
+    `Total Homicides` = total_homicides,
+    `Unsolved Homicides` = unsolved_homicides,
+    `Proportion Unsolved` = estimate,
+    `Lower 95% CI` = conf.low,
+    `Upper 95% CI` = conf.high
+  ) %>%
+  arrange(desc(`Proportion Unsolved`)) %>%
+  kable(
+    caption = "Proportion of Unsolved Homicides with Confidence Intervals by City",
+    format = "markdown"
+  )
+```
+
+Confidence intervals give additional context about the reliability of the estimates. Cities with fewer homicides will naturally have wider intervals due to smaller sample sizes.
+
+```{r}
+# Reorder cities by proportion of unsolved homicides
+city_results <- city_results %>%
+  arrange(desc(estimate)) %>%
+  mutate(city_state = factor(city_state, levels = city_state))
+
+# Create the plot
+ggplot(city_results, aes(x = city_state, y = estimate)) +
+  geom_point(size = 2, color = "darkblue") +  # Add points
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.3, color = "darkblue") +  # Add error bars
+  coord_flip() +  # Flip coordinates for readability
+  labs(
+    title = "Proportion of Unsolved Homicides Across U.S. Cities",
+    subtitle = "Including 95% Confidence Intervals",
+    x = "City, State",
+    y = "Proportion of Unsolved Homicides"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 8),    # Adjust y-axis text size
+    plot.title = element_text(size = 14, face = "bold"),  # Enhance title
+    plot.subtitle = element_text(size = 12),             # Add subtitle style
+    axis.title = element_text(size = 10)                 # Enhance axis titles
+  )
+
+```
+
+This plot provides a clear and compelling visualization of the challenges faced by U.S. cities in solving homicide cases. It highlights significant disparities between cities, offering a foundation for deeper investigation into the systemic and local factors influencing these outcomes.
+
+The distribution of proportions suggests a wide variation in the ability to resolve homicide cases across U.S. cities. Many cities have unsolved proportions around or above 50%, indicating a broader issue with homicide clearance rates in urban areas. Cities like Chicago, IL, and Baltimore, MD, show unsolved proportions close to or exceeding 75%, highlighting significant challenges in resolving homicide cases. These cities may face systemic issues, such as limited resources, high crime rates, or public mistrust of law enforcement. Cities like Tulsa, OK, and Richmond, VA, have much lower proportions of unsolved homicides, suggesting higher clearance rates. These cities may have more efficient investigative processes or lower overall crime rates, allowing for quicker resolutions.
+
+
